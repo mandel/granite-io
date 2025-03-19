@@ -32,6 +32,7 @@ dependencies = [
     "alchemy-config",
     "jsonschema",
     "nltk",
+    "pydantic",
 ]
 
 [project.optional-dependencies]
@@ -50,14 +51,14 @@ dev = [
     "isort==6.0.1",
     "pre-commit>=3.0.4,<5.0",
     "pylint>=2.16.2,<4.0",
-    "pylint-pydantic",
+    "pylint_pydantic",
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
     "pytest-html",
     "pytest-recording~=0.13.2",
     "pytest-retry~=1.7",
-    "ruff==0.9.10",
+    "ruff==0.11.0",
     "tox",
     "vcrpy==5.1.0",  # pin to avoid flakey newer
     "granite-io[transformers]",
