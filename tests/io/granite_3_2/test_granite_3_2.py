@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-
 # ruff: noqa: E501
 # pylint: disable=redefined-outer-name,broad-exception-caught
 
@@ -7,25 +6,28 @@
 import json
 
 # Third Party
-from litellm.exceptions import UnsupportedParamsError
+from litellm import UnsupportedParamsError
+from pydantic import ValidationError
 import pytest
 import transformers
 
 # Local
 from granite_io import make_io_processor
 from granite_io.backend import Backend
+from granite_io.backend.litellm import LiteLLMBackend
 from granite_io.backend.openai import OpenAIBackend
 from granite_io.backend.transformers import TransformersBackend
 from granite_io.io.consts import (
+    _GRANITE_3_2_2B_HF,
     _GRANITE_3_2_COT_END,
     _GRANITE_3_2_COT_START,
+    _GRANITE_3_2_MODEL_NAME,
 )
 from granite_io.io.granite_3_2.granite_3_2 import (
-    _MODEL_NAME,
-    GRANITE_3_2_2B_HF,
     Granite3Point2InputOutputProcessor,
 )
 from granite_io.io.granite_3_2.input_processors.granite_3_2_input_processor import (
+    _ControlsRecord,
     _Granite3Point2Inputs,
 )
 from granite_io.io.granite_3_2.output_processors.granite_3_2_output_parser import (
@@ -42,6 +44,7 @@ from granite_io.types import (
     ChatCompletionResults,
     Citation,
     Document,
+    GenerateInputs,
     GenerateResult,
     GenerateResults,
     Hallucination,
@@ -97,7 +100,7 @@ def input_json_str(request: pytest.FixtureRequest) -> str:
 
 @pytest.fixture(scope="session")
 def tokenizer() -> transformers.PreTrainedTokenizerBase:
-    model_path = GRANITE_3_2_2B_HF
+    model_path = _GRANITE_3_2_2B_HF
     try:
         ret = transformers.AutoTokenizer.from_pretrained(
             model_path, local_files_only=False
@@ -157,6 +160,30 @@ expected_hallucination = Hallucination(
     response_end=13,
 )
 ## Tests #######################################################################
+
+
+@pytest.mark.parametrize(
+    ["length", "originality", "error"],
+    [
+        (None, None, None),
+        ("short", None, None),
+        (None, "abstractive", None),
+        ("long", "extractive", None),
+        ("BAD_VAL", "abstractive", "input_value='BAD_VAL'"),
+        ("long", "BAD_VAL", "input_value='BAD_VAL'"),
+        ("BAD_VAL", "Another Bad Value", "input_value='BAD_VAL'"),
+        ("ShOrT", None, "input_value='ShOrT'"),
+        (None, "aBsTrAcTiVe", "input_value='aBsTrAcTiVe'"),
+        (1, None, "input_type=int"),
+        (None, 2, "input_type=int"),
+    ],
+)
+def test_controls_field_validators(length, originality, error):
+    if error:
+        with pytest.raises(ValidationError, match=error):
+            _ControlsRecord(length=length, originality=originality)
+    else:
+        _ControlsRecord(length=length, originality=originality)
 
 
 def test_read_inputs(input_json_str):
@@ -270,7 +297,7 @@ def test_completion_repetition_param(backend_x: Backend):
     }
     inputs = ChatCompletionInputs(messages=messages, generate_inputs=generate_inputs)
 
-    io_processor = make_io_processor(_MODEL_NAME, backend=backend_x)
+    io_processor = make_io_processor(_GRANITE_3_2_MODEL_NAME, backend=backend_x)
     try:
         outputs: ChatCompletionResults = io_processor.create_chat_completion(inputs)
     except TypeError as te:
@@ -301,7 +328,7 @@ def test_completion_presence_param(backend_x: Backend):
     }
     inputs = ChatCompletionInputs(messages=messages, generate_inputs=generate_inputs)
 
-    io_processor = make_io_processor(_MODEL_NAME, backend=backend_x)
+    io_processor = make_io_processor(_GRANITE_3_2_MODEL_NAME, backend=backend_x)
     try:
         outputs: ChatCompletionResults = io_processor.create_chat_completion(inputs)
     except UnsupportedParamsError as upe:
@@ -318,7 +345,7 @@ def test_completion_presence_param(backend_x: Backend):
 @pytest.mark.vcr
 def test_run_processor(backend_x: Backend, input_json_str: str):
     inputs = ChatCompletionInputs.model_validate_json(input_json_str)
-    io_processor = make_io_processor(_MODEL_NAME, backend=backend_x)
+    io_processor = make_io_processor(_GRANITE_3_2_MODEL_NAME, backend=backend_x)
     outputs: ChatCompletionResults = io_processor.create_chat_completion(inputs)
 
     assert isinstance(outputs, ChatCompletionResults)
@@ -426,3 +453,22 @@ def test_citation_hallucination_parsing(
     assert result.citations == exp_citation
     assert result.documents == exp_document
     assert result.hallucinations == exp_hallucination
+
+
+@pytest.mark.vcr(record_mode="new_episodes")
+@pytest.mark.block_network
+def test_multiple_return(backend_x: Backend, input_json_str: str):
+    inputs = ChatCompletionInputs.model_validate_json(input_json_str)
+    inputs = inputs.model_copy(
+        update={"generate_inputs": GenerateInputs(max_tokens=1024, n=3)}
+    )
+    io_processor = make_io_processor(_GRANITE_3_2_MODEL_NAME, backend=backend_x)
+    try:
+        results: ChatCompletionResults = io_processor.create_chat_completion(inputs)
+    except UnsupportedParamsError:
+        if isinstance(backend_x, LiteLLMBackend):
+            pytest.xfail("LiteLLMBackend support for n > 1 varies by provider")
+
+    assert isinstance(results, ChatCompletionResults)
+    assert len(results.results) == 3
+    # TODO: Verify outputs in greater detail

@@ -37,15 +37,17 @@ dependencies = [
 
 [project.optional-dependencies]
 transformers = [
-    "torch",
-    "transformers",
+    "transformers[torch]",
 ]
 openai = [
     "openai",
 ]
 litellm = [
     "litellm",
-    "python-dotenv==1.0.1",
+    "python-dotenv==1.1.0",
+]
+voting = [
+    "pandas"
 ]
 pdl = [
     "prompt-declaration-language",
@@ -61,19 +63,17 @@ dev = [
     "pytest-html",
     "pytest-recording~=0.13.2",
     "pytest-retry~=1.7",
-    "ruff==0.11.0",
+    "ruff==0.11.2",
     "tox",
     "vcrpy==5.1.0",  # pin to avoid flakey newer
     "granite-io[transformers]",
     "granite-io[openai]",
     "granite-io[litellm]",
     "granite-io[pdl]",
+    "granite-io[voting]"
 ]
 notebook = [
-    "ipywidgets",
-    "ipykernel",
-    "jupyter",
-    "graphviz",
+    "notebook"
 ]
 all = [
     "granite-io[dev]",

@@ -16,7 +16,8 @@ on:
       - "main"
       - "release-**"
     paths:
-      - '**.py'
+      - 'src/**.py'
+      - 'tests/**.py'
       - 'pyproject.toml'
       - 'tox.ini'
       - '.github/workflows/test.yml' # This workflow
@@ -59,7 +60,7 @@ jobs:
         uses: ./.github/actions/free-disk-space
   
       - name: Setup Python ${{ matrix.python }}
-        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+        uses: actions/setup-python@8d9ed9ac5c53483de85588cdf95a591a75ab9f55 # v5.5.0
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -71,7 +72,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install tox tox-gh>=1.2
 
-      - name: Run unit test with tox (xfail openai and litellm tests for now)
+      - name: "Run unit tests (skipping e2e transformers)"
         run: |
-          tox
+          tox -- -k "not transformers" tests
 

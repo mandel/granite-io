@@ -1,26 +1,27 @@
-name: Lint
+# SPDX-License-Identifier: Apache-2.0
 
+name: e2e Testing (transformers...)
 on:
   push:
     branches:
       - "main"
       - "release-**"
     paths:
-      - '**.py'
+      - 'src/**.py'
+      - 'tests/**.py'
       - 'pyproject.toml'
       - 'tox.ini'
-      - '.pylintrc'
-      - '.github/workflows/lint.yml' # This workflow
+      - '.github/workflows/est_e2e.*' # This workflow
   pull_request:
     branches:
       - "main"
       - "release-**"
     paths:
-      - '**.py'
+      - 'src/**.py'
+      - 'tests/**.py'
       - 'pyproject.toml'
       - 'tox.ini'
-      - '.pylintrc'
-      - '.github/workflows/lint.yml' # This workflow
+      - '.github/workflows/test_e2e.*' # This workflow
 
 env:
   LC_ALL: en_US.UTF-8
@@ -33,37 +34,32 @@ permissions:
   contents: read
 
 jobs:
-  lint:
-    runs-on: ubuntu-latest
-    name: "lint: ${{ matrix.lint.name }}"
+  test_e2e:
+    name: "test-e2e: using ${{ matrix.python }} on ${{ matrix.platform }}"
+    runs-on: "${{ matrix.platform }}"
     strategy:
-      fail-fast: false
       matrix:
-        lint:
-          - name: "ruff"
-            commands: |
-              tox -e ruff
-          - name: "pylint"
-            commands: |
-              echo "::add-matcher::.github/workflows/matchers/pylint.json"
-              tox -e lint
-  
+        python:
+          - "3.10"
+        platform:
+          - "ubuntu-latest"
+
     steps:
       - name: "Harden Runner"
         uses: step-security/harden-runner@4d991eb9b905ef189e4c376166672c3f2f230481 # v2.11.0
         with:
           egress-policy: audit # TODO: change to 'egress-policy: block' after couple of runs
 
-      - name: "Checkout"
+      - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           # https://github.com/actions/checkout/issues/249
           fetch-depth: 0
 
-      - name: Setup Python 3.11
+      - name: Setup Python ${{ matrix.python }}
         uses: actions/setup-python@8d9ed9ac5c53483de85588cdf95a591a75ab9f55 # v5.5.0
         with:
-          python-version: 3.11
+          python-version: ${{ matrix.python }}
           cache: pip
           cache-dependency-path: |
             **/pyproject.toml
@@ -71,8 +67,8 @@ jobs:
       - name: "Install tox"
         run: |
           python -m pip install --upgrade pip
-          python -m pip install tox tox-gh
+          python -m pip install tox tox-gh>=1.2
 
-      - name: "${{ matrix.lint.name }}"
+      - name: "Run e2e tests (transformers)"
         run: |
-          ${{ matrix.lint.commands }}
+          tox -- -k transformers tests

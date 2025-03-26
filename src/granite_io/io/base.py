@@ -92,12 +92,15 @@ class InputOutputProcessor(FactoryConstructible):
         coroutine_to_run = self.acreate_chat_completion(inputs)
         try:  # Exceptions as control flow. Sorry, asyncio forces this design on us.
             asyncio.get_running_loop()
+
+            # If we get here, this code is running inside an async function.
+            return _workaround_for_horrible_design_flaw_in_asyncio(coroutine_to_run)
         except RuntimeError:
             # If we get here, this code is not running inside an async function.
-            return asyncio.run(coroutine_to_run)
-
-        # If we get here, this code is running inside an async function.
-        return _workaround_for_horrible_design_flaw_in_asyncio(coroutine_to_run)
+            # First we exit the the exception handler; otherwise any exceptions that are
+            # thrown from the coroutine will be chained off the current RuntimeError.
+            pass
+        return asyncio.run(coroutine_to_run)
 
 
 class ModelDirectInputOutputProcessor(InputOutputProcessor):
@@ -131,14 +134,15 @@ class ModelDirectInputOutputProcessor(InputOutputProcessor):
                 "configuring an inference backend."
             )
 
-        generate_inputs = inputs.generate_inputs or GenerateInputs()
+        # Do not modify `inputs` in place. It is VERY VERY IMPORTANT not to do so.
+        # The caller may be using that object for something else.
+        generate_inputs = (
+            inputs.generate_inputs.model_copy()
+            if inputs.generate_inputs is not None
+            else GenerateInputs()
+        )
         generate_inputs.prompt = self.inputs_to_string(inputs)
-
-        # kwargs = inputs.model_dump()
-        # kwargs["prompt"] = prompt
-
         model_output = await self._backend.pipeline(generate_inputs)
-
         return self.output_to_result(output=model_output, inputs=inputs)
 
     @abc.abstractmethod
@@ -236,3 +240,86 @@ class OutputProcessor(FactoryConstructible):
 
         :returns: The parsed output so far
         """
+
+
+def make_new_io_processor(
+    input_processor: InputProcessor,
+    output_processor: OutputProcessor,
+    config: aconfig.Config = None,
+    backend: Backend | None = None,
+) -> ModelDirectInputOutputProcessor:
+    """
+    Wrapper function that creates an instance of an InputOutputProcessor based on the
+    InputProcessor and OutputProcessor passed in the function call.
+
+    :param input_processor: Processor that performs processing of input to model
+    :param input_processor: Processor that performs processing of output from the model
+    :param config: Setup config for this IO processor
+    :param backend: Handle on inference engine, required if this io processor's
+        :func:`create_chat_completion()` method is going to be used
+
+    :returns: The IO processor
+
+    :raise: ValueError - If input or output processor is None
+    """
+
+    class _InputOutputProcessor(ModelDirectInputOutputProcessor):
+        """
+        InputOutputProcessor template.
+
+        This InputOutputProcessor is based on the input and the output processors
+        passed during creation.
+        """
+
+        def __init__(
+            self,
+            input_processor: InputProcessor,
+            output_processor: OutputProcessor,
+            config: aconfig.Config = None,
+            backend: Backend | None = None,
+        ):
+            """
+            :param input_processor: Processor that performs processing of input to
+                model
+            :param input_processor: Processor that performs processing of output from
+                the model
+            :param config: Setup config for this IO processor
+            :param backend: Handle on inference engine, required if this io processor's
+                :func:`create_chat_completion()` method is going to be used
+
+            :raise: ValueError - If input or output processor is None
+            """
+            super().__init__(config=config, backend=backend)
+
+            self._input_processor = input_processor
+            self._output_processor = output_processor
+
+            if self._input_processor is None:
+                raise ValueError(
+                    "Attempted to create IO Processor without "
+                    "setting an Input Processor ."
+                )
+            if self._output_processor is None:
+                raise ValueError(
+                    "Attempted to create IO Processor without "
+                    "setting an Output Processor ."
+                )
+
+        def inputs_to_string(
+            self, inputs: ChatCompletionInputs, add_generation_prompt: bool = True
+        ) -> str:
+            return self._input_processor.transform(inputs, add_generation_prompt)
+
+        def output_to_result(
+            self,
+            output: GenerateResults,
+            inputs: ChatCompletionInputs | None = None,
+        ) -> ChatCompletionResults:
+            return self._output_processor.transform(output, inputs)
+
+    return _InputOutputProcessor(
+        input_processor=input_processor,
+        output_processor=output_processor,
+        config=config,
+        backend=backend,
+    )
